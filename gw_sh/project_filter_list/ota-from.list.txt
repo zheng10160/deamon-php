@@ -1,0 +1,188 @@
+#!/bin/bash
+#Created by YuLL <liangliang.yu@onebank.com.cn>
+#set -x
+. ./help/fun.sh ## 帮助函数
+
+## 项目根目录 这里注意 远程与本地目录结构应该相同
+ROOT_PATH="/data/www"
+#本地参数
+TAGS_PATH=""
+ENV="" ## test环境
+TAG=""
+BUSINESS=""
+TOOL="shell"
+
+## 远程
+HTTP_SERVER_ACCOUNT="root"
+
+projectName="" ## 项目名称
+
+project_version_log="project_version_log" ## 记录每个版本当前的版本号 目录
+
+
+#接收用户输入参数
+while getopts p:e:project:v: opt
+do
+        case "$opt" in
+                p)TAGS_PATH=${OPTARG};;
+                e)ENV=${OPTARG};;
+                project)${projectName}=${OPTARG};;
+                v)TAG=${OPTARG};;
+                *);;
+        esac;
+done;
+
+## 后续流程
+cat <<update
++------------------------------------------+
++                 U) 发布项目               +
++                 C) 回退上一版本            +
++                 Q) 退出                   +
++------------------------------------------+
+update
+
+read -p "请输入 (U|C|Q) ,再按ENTER键: " INPUT ##选择操作
+
+if [ $INPUT = "U"];then
+    ## 发布项目流程
+
+    ## 检验输入参数
+    chekc_par
+
+    ## 根据 -e 设置远程ip
+    set_env_config
+
+    ## 显示发布时相关信息
+    last_check
+
+elif [ $INPUT ="C" ];then
+   ## 版本回退流程
+   last_check ## 提示当前发布相关信息
+
+elif [ $INPUT ="Q" ];then
+echo "\n ---------------bye bye--------------"
+    exit 0
+else
+    exit 0
+
+fi
+
+## 检验输入的参数 是否正确
+chekc_par()
+{
+        if [ -z $TAGS_PATH ]
+                then
+                echoColor red "缺少本地原始路径地址"
+                 exit -1
+        elif [ -z $ENV ]
+                then
+                echoColor red "发布环境地质不明确 < test | staging | pro >"
+                 exit -1
+        elif [ -z $projectName ]
+                then
+               echoColor red "发布的项目名称不能为空,请核对"
+                 exit -1
+        elif [ -z $TAG ]
+                then
+                 echoColor red "发布项目的版本信息不能为空 EG:v0.0.1"
+                 exit -1
+        fi
+}
+
+
+## 根据输入的 -e 参数 设置当前环境
+set_env_config()
+{
+    if [ $ENV = "test" ];then
+        REMOTE_IP='106.75.122.206';
+
+    elif [ $ENV = "staging" ];then
+        ##REMOTE_IP='106.75.37.77' ##老得staging
+        REMOTE_IP='106.75.93.33'
+
+    elif [ $ENV = "pro" ];then
+        REMOTE_IP='106.75.98.162'
+    else
+          echoColor red "你输入的环境名称有误，只能在给出的名称中选择 < test | staging | pro > \n"
+         exit -1;
+    fi
+}
+
+
+## 发布的提示信息 1
+last_check()
+{
+        local current_ver="" ## 上一次版本名称
+
+        if [ ! -d $project_version_log/$projectName ]; then ## 检测是否存在历史版本 log信息 如果没有说明是第一次版本 可以默认为 v0.0.1
+            ##if [ "ssh $REMOTE_ACCOUNT@$REMOTE_IP -d $RootPath/$projectName" ]; then ## 远程操作
+             current_ver='初始版本' ## 第一没有历史版本 为出事版本
+        else
+            current_ver=`cat "$project_version_log/$projectName"`
+        fi
+
+        echo;
+        echo $prefix"deploy list::"$aftfix
+        printf "%-17s => %-s\n" "本地项目路径:" $TAGS_PATH;
+        printf "%-19s => %-s\n" "上一次版本:" $current_ver;
+        printf "%-15s => %-s\n" "发布环境:" $ENV;
+        printf "%-15s => %-s\n" "发布脚本工具:" "shell";
+        printf "%-14s => %-s\n" "远程服务器IP:" $REMOTE_IP;
+        printf "%-13s => %-s\n" "发布使用账户:" $HTTP_SERVER_ACCOUNT;
+        printf "%-15s => %-s\n" "远程路径:" $ROOT_PATH/$projectName;
+        # echo $HTTP_SERVER_ACCOUNT|gawk '{printf "%-15s => %-s\n","http服务账户",$1}';
+        echo;
+
+}
+
+## 发布项目
+do_deploy()
+{
+        if [ -z $TAGS_PATH ];then
+            echoColor yellow "\n 当前目录下项目目录不存在"
+            echoColor yellow "\n ${TAGS_PATH}"
+             exit -1;
+        fi
+        #检查文件
+        DATE=$(date '+%Y%m%d%H%M%S')
+        tmpPath=$TAG"_"$DATE
+
+         #确认发布
+        last_check
+         read -n1 -p $prefix"Please confirm these release documents, deploy now? [Y|N]"$aftfix -s answer
+        case "$answer" in
+                Y|y)post_depoly
+                    ;;
+                *) echo ; exit 0;;
+        esac;
+
+
+        case "$TOOL" in
+                #svn) svn export $TAGS_PATH/$TAG $tmpPath > /dev/null &
+                #       loop_process "svn check out from $TAGS_PATH/$TAG"
+           #       ;;
+        #       git)
+                #       mkdir -p $tmpPath;
+                #       cd $tmpPath;
+                #       git init;
+                #       git remote add dep $TAGS_PATH;
+                #       git pull dep &
+                #       loop_process $prefix"git check out from $TAGS_PATH/$TAG"$aftfix;
+                #       git checkout $TAG;
+                #       rm .git -rf;
+                #       ;;
+                shell)
+                     echo -e "\n 开始远程同步项目"
+                     ssh $REMOTE_ACCOUNT@$REMOTE_IP "mkdir -p $REMOTE_PATH"; ## 创建远程备份目录
+                     echo -e "\n ---------------------------rsync start---------------------------"
+                     rsync -vrut --progress --delete --exclude "messages" --exclude "public/upload"  --exclude "public/uploads" --exclude "public/download" --exclude "deploy"   $TAGS_PATH/* $REMOTE_ACCOUNT@${REMOTE_IP}:${REMOTE_PATH};return 0;;
+                *) usage "Please use svn or git to deploy";;
+        esac;
+        cd $NOW_PATH
+
+        #用户自修改
+        #modify_deploy
+
+
+}
+
